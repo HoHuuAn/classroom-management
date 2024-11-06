@@ -31,7 +31,10 @@ class ClassRoomManagementSystem(QMainWindow):
         self.teacher_window = Teacher_Window()
         self.booking_window = Booking_Window()
 
-        self.calendar.selectionChanged.connect(self.get_selected_date)
+        # Connect finished signals to refresh_data
+        self.room_window.finished.connect(lambda: self.refresh_data())
+        self.teacher_window.finished.connect(lambda: self.refresh_data())
+        self.booking_window.finished.connect(lambda: self.refresh_data())
 
         ### BUTTONS ###
         self.teacher_btn.clicked.connect(self.open_teacher_window)
@@ -39,6 +42,17 @@ class ClassRoomManagementSystem(QMainWindow):
         self.booking_btn.clicked.connect(self.open_booking_window)
         self.refresh_btn.clicked.connect(lambda: self.refresh_data(
             self.calendar.selectedDate().toString('dd-MM-yyyy')))
+        
+        ### CALENDAR ###
+        self.calendar.selectionChanged.connect(self.get_selected_date)
+        self.calendar.setStyleSheet("""
+            QCalendarWidget QAbstractItemView:enabled
+            {
+                selection-background-color: #1B3C2E; 
+                selection-color: white;
+                color: #1B3C2E;
+            }
+        """)
 
         self.refresh_data()
 
@@ -60,18 +74,36 @@ class ClassRoomManagementSystem(QMainWindow):
         self.time_table_dashboard.setShowGrid(False)
 
         self.time_table_dashboard.setStyleSheet("""
+            QHeaderView::vertical::section {
+                background-color: #1B3C2E;
+            }
             QHeaderView::section {
-                background-color: #1B3C2E;  
-                color: white;              
+                color: white;
                 font-weight: bold;
                 padding: 4px;
             }
         """)
 
         # Set Horizontal Headers
-        first_elements = [item[0] for item in room if item[3] == 'OK']
-        self.time_table_dashboard.setColumnCount(len(first_elements))
-        self.time_table_dashboard.setHorizontalHeaderLabels(first_elements)
+        double_rooms = [item[0] for item in room if item[1] ==
+                        'Double' and item[3] == 'OK']
+        single_rooms = [item[0] for item in room if item[1] ==
+                        'Single' and item[3] == 'OK']
+        room_columns = sum([[f"{room}_1", f"{room}_2"]
+                           for room in double_rooms], []) + single_rooms
+
+        # Update column count and headers
+        self.time_table_dashboard.setColumnCount(len(room_columns))
+        self.time_table_dashboard.setHorizontalHeaderLabels(room_columns)
+
+        # Customize header background color for double rooms
+        header = self.time_table_dashboard.horizontalHeader()
+        for col, room_name in enumerate(room_columns):
+            header_item = self.time_table_dashboard.horizontalHeaderItem(col)
+            if any(room_name.startswith(double_room) for double_room in double_rooms):
+                header_item.setBackground(QBrush(QColor("red")))
+            else:
+                header_item.setBackground(QBrush(QColor("#1B3C2E")))
 
         # Set Vertical Headers for time slots
         self.time_table_dashboard.setRowCount(34)
@@ -85,126 +117,51 @@ class ClassRoomManagementSystem(QMainWindow):
                 break
         self.time_table_dashboard.setVerticalHeaderLabels(time_labels)
 
+        # Clear the table
         self.time_table_dashboard.clearContents()
+        self.time_table_dashboard.clearSpans()
 
         # Fetch bookings for the selected date
         if selected_date:
-            bookings = database.fetch_data_booking_with_selected_date(selected_date)
+            bookings = database.fetch_data_booking_with_selected_date(
+                selected_date)
             for booking in bookings:
                 booking_id, teacher, room_id, date, start_time, end_time = booking
 
                 start_row = time_labels.index(start_time)
                 end_row = time_labels.index(end_time)
 
-                try:
-                    col = first_elements.index(room_id)
-                except ValueError:
-                    continue
+                # Determine the column index, accounting for room type
+                if room_id in double_rooms:
+                    # Check if the first sub-column is available
+                    col_base = room_columns.index(f"{room_id}_1")
+                    if not self.time_table_dashboard.item(start_row, col_base):
+                        col = col_base
+                    else:
+                        col = room_columns.index(f"{room_id}_2")
+                else:
+                    try:
+                        col = room_columns.index(room_id)
+                    except Exception as e:
+                        print(e)
+                        continue
 
-                self.time_table_dashboard.setSpan(start_row, col, end_row - start_row, 1)
+                self.time_table_dashboard.setSpan(
+                    start_row, col, end_row - start_row, 1)
 
                 # Set the teacher name and time
-                item = QTableWidgetItem(f"{teacher}\n{start_time} - {end_time}")
+                item = QTableWidgetItem(
+                    f"{teacher}\n{start_time} - {end_time}")
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.time_table_dashboard.setItem(start_row, col, item)
 
                 # Color the cells
-                random_color = QColor(random.randint(150, 255), random.randint(150, 255), random.randint(150, 255))
+                random_color = QColor(random.randint(150, 255), random.randint(
+                    150, 255), random.randint(150, 255))
                 item.setBackground(QBrush(random_color))
 
                 # Automatically resize column and row to fit the content
                 self.time_table_dashboard.resizeRowToContents(start_row)
-    # def refresh_data(self, selected_date=QDate.currentDate().toString('dd-MM-yyyy')):
-    #     room = self.room_window.fetch_data()
-    #     self.time_table_dashboard.setShowGrid(False)
-
-    #     self.time_table_dashboard.setStyleSheet("""
-    #         QHeaderView::section {
-    #             background-color: #1B3C2E;  
-    #             color: white;              
-    #             font-weight: bold;
-    #             padding: 4px;
-    #         }
-    #     """)
-
-    #     # Set Horizontal Headers
-    #     first_elements = [item[0] for item in room if item[3] == 'OK']
-    #     self.time_table_dashboard.setColumnCount(len(first_elements))
-    #     self.time_table_dashboard.setHorizontalHeaderLabels(first_elements)
-
-    #     # Set Vertical Headers for time slots
-    #     self.time_table_dashboard.setRowCount(34)
-    #     time = QTime(6, 0)
-    #     time_labels = []
-    #     for _ in range(self.time_table_dashboard.rowCount()):
-    #         time_str = time.toString("hh:mm")
-    #         time_labels.append(time_str)
-    #         time = time.addSecs(1800)
-    #         if time.hour() >= 23 and time.minute() >= 0:
-    #             break
-    #     self.time_table_dashboard.setVerticalHeaderLabels(time_labels)
-
-    #     self.time_table_dashboard.clearContents()
-
-    #     # Fetch bookings for the selected date
-    #     if selected_date:
-    #         bookings = database.fetch_data_booking_with_selected_date(selected_date)
-    #         booking_slots = {room_id: [] for room_id in first_elements}
-
-    #         for booking in bookings:
-    #             booking_id, teacher, room_id, date, start_time, end_time = booking
-    #             start_row = time_labels.index(start_time)
-    #             end_row = time_labels.index(end_time)
-
-    #             # Check if the room is in the header list
-    #             try:
-    #                 col = first_elements.index(room_id)
-    #             except ValueError:
-    #                 continue
-
-    #             # Check if the room type is "Double"
-    #             room_type = database.check_type_room(room_id)
-
-    #             if room_type == "Double":
-    #                 booking_slots[room_id].append((start_row, end_row, teacher, start_time, end_time))
-    #             else:
-    #                 # Single rooms are displayed as one block
-    #                 self.time_table_dashboard.setSpan(start_row, col, end_row - start_row, 1)
-    #                 item = QTableWidgetItem(f"{teacher}\n{start_time} - {end_time}")
-    #                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-    #                 random_color = QColor(random.randint(150, 255), random.randint(150, 255), random.randint(150, 255))
-    #                 item.setBackground(QBrush(random_color))
-    #                 self.time_table_dashboard.setItem(start_row, col, item)
-    #                 self.time_table_dashboard.resizeRowToContents(start_row)
-
-    #         # Handle overlapping bookings for "Double" rooms
-    #         for room_id, bookings in booking_slots.items():
-    #             if len(bookings) > 1:
-    #                 bookings.sort(key=lambda x: x[0])  # Sort bookings by start_row for easier placement
-    #                 col = first_elements.index(room_id)
-    #                 for i, (start_row, end_row, teacher, start_time, end_time) in enumerate(bookings[:2]):
-    #                     span_rows = end_row - start_row
-    #                     item = QTableWidgetItem(f"{teacher}\n{start_time} - {end_time}")
-    #                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-    #                     random_color = QColor(random.randint(150, 255), random.randint(150, 255), random.randint(150, 255))
-    #                     item.setBackground(QBrush(random_color))
-                        
-    #                     # Place items side-by-side within the same time range column
-    #                     self.time_table_dashboard.setItem(start_row, col + i, item)
-    #                     self.time_table_dashboard.setSpan(start_row, col + i, span_rows, 1)
-    #                     self.time_table_dashboard.resizeRowToContents(start_row)
-    #             else:
-    #                 # Single booking in a "Double" room
-    #                 for start_row, end_row, teacher, start_time, end_time in bookings:
-    #                     item = QTableWidgetItem(f"{teacher}\n{start_time} - {end_time}")
-    #                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-    #                     random_color = QColor(random.randint(150, 255), random.randint(150, 255), random.randint(150, 255))
-    #                     item.setBackground(QBrush(random_color))
-    #                     self.time_table_dashboard.setItem(start_row, col, item)
-    #                     self.time_table_dashboard.setSpan(start_row, col, end_row - start_row, 1)
-    #                     self.time_table_dashboard.resizeRowToContents(start_row)
-
-
 
 
 if __name__ == '__main__':

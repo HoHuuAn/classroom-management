@@ -158,41 +158,47 @@ class Booking_Window(QDialog):
             conn = sqlite3.connect('classroom_management.db')
             cursor = conn.cursor()
 
-            room_type = database.check_type_room(room) 
+            room_type = database.check_type_room(room)
 
             # Check for overlapping bookings for the same room and date
             cursor.execute("""
                 SELECT start_time, end_time FROM booking 
                 WHERE room = ? AND date = ? AND (
-                    (? > start_time AND ? < end_time) OR
-                    (? > start_time AND ? < end_time) OR
+                    (? >= start_time AND ? < end_time) OR
+                    (? > start_time AND ? <= end_time) OR
                     (start_time >= ? AND start_time < ?) OR
                     (end_time > ? AND end_time <= ?)
                 )
             """, (room, date, start_time, start_time, end_time, end_time, start_time, end_time, start_time, end_time))
 
             overlaps = cursor.fetchall()
-            
+
             # Check based on room type
             if room_type == "Single" and overlaps:
-                # Warn if any overlap is found for "Single" rooms
                 QMessageBox.warning(
                     self, "Booking Conflict",
                     f"A booking for {room} on {date} conflicts with the selected time range {start_time} - {end_time}.\n"
                     f"Existing booking time: {overlaps[0][0]} - {overlaps[0][1]}"
                 )
                 conn.close()
-                return  # Exit without adding the booking if there is a conflict
+                return
 
-            elif room_type == "Double" and len(overlaps) >= 2:
-                # Warn if more than two overlaps are found for "Double" rooms
-                QMessageBox.warning(
-                    self, "Booking Conflict",
-                    f"Room {room} on {date} can only accommodate up to two overlapping bookings.\n"
-                    f"Selected time range {start_time} - {end_time} conflicts with existing bookings."
-                )
-                conn.close()
-                return  # Exit without adding the booking if there are already two overlaps
+            elif room_type == "Double":
+                # Filter out overlaps that only touch boundaries without overlapping
+                true_overlaps = [
+                    (overlap_start, overlap_end) for overlap_start, overlap_end in overlaps
+                    if not (start_time == overlap_end or end_time == overlap_start)
+                ]
+
+                if len(true_overlaps) >= 2:
+                    QMessageBox.warning(
+                        self, "Booking Conflict",
+                        f"Room {room} on {date} can only accommodate up to two overlapping bookings.\n"
+                        f"Selected time range {start_time} - {end_time} conflicts with existing bookings.\n"
+                        f"Existing bookings: {true_overlaps[0][0]} - {true_overlaps[0][1]} and {true_overlaps[1][0]} - {true_overlaps[1][1]}"
+                    )
+                    conn.close()
+                    return  # Exit without adding the booking if there are already two overlaps
 
             # Insert the new booking if constraints are met
             cursor.execute(
@@ -202,8 +208,9 @@ class Booking_Window(QDialog):
             conn.commit()
             conn.close()
 
-            QMessageBox.information(self, "Booking Created", "The booking has been created successfully.")
-            
+            QMessageBox.information(
+                self, "Booking Created", "The booking has been created successfully.")
+
             # Reset form selections
             self.teacher_booking.setCurrentIndex(0)
             self.room_booking.setCurrentIndex(0)
@@ -242,7 +249,6 @@ class Booking_Window(QDialog):
 
             QMessageBox.information(
                 self, "Booking Updated", "The booking has been updated successfully.")
-            
 
             self.refresh_data()
 
